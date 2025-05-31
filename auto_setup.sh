@@ -15,7 +15,7 @@ fi
 
 # 🎯 Enterprise-grade logging and error handling
 readonly LOG_FILE="/tmp/auto_setup_$(date +%s).log"
-readonly SCRIPT_VERSION="2.1.0"
+readonly SCRIPT_VERSION="2.2.0"
 readonly REQUIRED_COMMANDS="git gh curl"
 readonly CONFIG_FILE="$HOME/.claude_auto_project_config"
 
@@ -901,6 +901,147 @@ validate_environment() {
   success "環境検証が完了しました"
 }
 
+# Real-time sync and monitoring like Cursor
+monitor_claude_progress() {
+  local project_name="$1"
+  local project_dir="$2"
+
+  log "🤖 Claudeの進捗をリアルタイム監視中..."
+  echo "" >&2
+  echo "┌─────────────────────────────────────────────────────────┐" >&2
+  echo "│  🤖 Claude AI エージェント - リアルタイム監視モード      │" >&2
+  echo "│                                                         │" >&2
+  echo "│  💡 Cursor風の体験: 変更を自動検出してローカル同期     │" >&2
+  echo "└─────────────────────────────────────────────────────────┘" >&2
+  echo "" >&2
+
+  local check_count=0
+  local max_checks=60  # 30分間監視 (30秒間隔)
+  local last_commit=""
+  local initial_commit
+  initial_commit=$(git rev-parse HEAD)
+
+  echo "🔍 監視開始: feat/initial-development ブランチ" >&2
+  echo "⏱️  30秒間隔でチェック (最大30分)" >&2
+  echo "🛑 Ctrl+C で監視を停止" >&2
+  echo "" >&2
+
+  while [[ $check_count -lt $max_checks ]]; do
+    ((check_count++))
+
+    # Progress indicator
+    local dots=$(printf "%.0s." $(seq 1 $((check_count % 4))))
+    printf "\r🔄 チェック中 %s [%d/%d]" "$dots" "$check_count" "$max_checks" >&2
+
+    # Check for new commits
+    git fetch origin feat/initial-development >/dev/null 2>&1
+    local latest_commit
+    latest_commit=$(git rev-parse origin/feat/initial-development)
+
+    if [[ "$latest_commit" != "$last_commit" ]] && [[ "$latest_commit" != "$initial_commit" ]]; then
+      echo "" >&2
+      echo "✨ 新しい変更を検出しました！" >&2
+      echo "" >&2
+
+      # Show commit details
+      git log --oneline -1 "$latest_commit" >&2
+      echo "" >&2
+
+      # Pull changes
+      log "📥 変更をローカルに同期中..."
+      git pull origin feat/initial-development >/dev/null 2>&1
+
+      # Show file changes
+      local changed_files
+      changed_files=$(git diff --name-only "$last_commit".."$latest_commit" 2>/dev/null || git ls-files)
+
+      if [[ -n "$changed_files" ]]; then
+        echo "📁 変更されたファイル:" >&2
+        echo "$changed_files" | while read -r file; do
+          if [[ -f "$file" ]]; then
+            local file_size
+            file_size=$(wc -l < "$file" 2>/dev/null || echo "0")
+            echo "   ✅ $file ($file_size 行)" >&2
+          fi
+        done
+        echo "" >&2
+
+        # Auto-install dependencies if package.json exists
+        if [[ -f "package.json" ]]; then
+          log "📦 依存関係を自動インストール中..."
+          npm install >/dev/null 2>&1 && success "依存関係のインストール完了" || warning "依存関係のインストールでエラーが発生"
+        fi
+
+        # Auto-install Python dependencies if requirements.txt exists
+        if [[ -f "requirements.txt" ]]; then
+          log "🐍 Python依存関係を自動インストール中..."
+          pip install -r requirements.txt >/dev/null 2>&1 && success "Python依存関係のインストール完了" || warning "Python依存関係のインストールでエラーが発生"
+        fi
+
+        # Open in preferred editor
+        open_in_editor "$project_dir"
+
+        # Show success message
+        echo "🎉 同期完了！以下で開発を続行できます:" >&2
+        echo "" >&2
+        echo "   📂 プロジェクトフォルダ: $project_dir" >&2
+        if [[ -f "package.json" ]]; then
+          echo "   🚀 開発サーバー起動: npm run dev" >&2
+        fi
+        if [[ -f "requirements.txt" ]]; then
+          echo "   🐍 Python サーバー起動: python app.py" >&2
+        fi
+        echo "   🔗 GitHub PR: https://github.com/$GH_USERNAME/$project_name/pull/1" >&2
+        echo "" >&2
+
+        return 0
+      fi
+
+      last_commit="$latest_commit"
+    fi
+
+    # Check if Claude is still working (look for recent comments)
+    local recent_comments
+    recent_comments=$(gh api repos/"$GH_USERNAME"/"$project_name"/issues/1/comments --jq '.[].created_at' 2>/dev/null | tail -1)
+    if [[ -n "$recent_comments" ]]; then
+      local comment_age
+      comment_age=$(date -d "$recent_comments" +%s 2>/dev/null || echo "0")
+      local current_time
+      current_time=$(date +%s)
+      local age_minutes=$(( (current_time - comment_age) / 60 ))
+
+      if [[ $age_minutes -lt 5 ]]; then
+        printf " (Claudeが作業中...)" >&2
+      fi
+    fi
+
+    sleep 30
+  done
+
+  echo "" >&2
+  warning "監視時間が終了しました。手動で確認してください: https://github.com/$GH_USERNAME/$project_name/pull/1"
+}
+
+# Smart editor detection and opening
+open_in_editor() {
+  local project_dir="$1"
+
+  # Detect preferred editor
+  if command -v cursor >/dev/null 2>&1; then
+    log "🎯 Cursorでプロジェクトを開いています..."
+    cursor "$project_dir" >/dev/null 2>&1 &
+  elif command -v code >/dev/null 2>&1; then
+    log "💻 VS Codeでプロジェクトを開いています..."
+    code "$project_dir" >/dev/null 2>&1 &
+  elif command -v subl >/dev/null 2>&1; then
+    log "📝 Sublime Textでプロジェクトを開いています..."
+    subl "$project_dir" >/dev/null 2>&1 &
+  else
+    log "📂 Finderでプロジェクトフォルダを開いています..."
+    open "$project_dir" >/dev/null 2>&1 &
+  fi
+}
+
 # Main execution function
 main() {
   log "🚀 Claude自動プロジェクトセットアップ v$SCRIPT_VERSION を開始"
@@ -973,19 +1114,65 @@ main() {
   echo "🔗 GitHubリポジトリ: https://github.com/$GH_USERNAME/$project_name" >&2
   echo "📋 プルリクエスト: https://github.com/$GH_USERNAME/$project_name/pulls" >&2
   echo "" >&2
-  echo "🤖 Claudeの動作確認:" >&2
-  echo "   1. 上記のプルリクエストリンクを開く" >&2
-  echo "   2. コメント欄で '@claude' の投稿を確認" >&2
-  echo "   3. Claudeからの返信を待つ（通常1-3分）" >&2
-  echo "   4. 自動生成されたコードを確認" >&2
+
+  # Interactive next steps (Cursor-style UX)
+  echo "🚀 次に何をしますか？" >&2
+  echo "1. 🤖 Claudeの進捗をリアルタイムで監視 (推奨)" >&2
+  echo "2. 🎯 今すぐCursorで開く" >&2
+  echo "3. 💻 VS Codeで開く" >&2
+  echo "4. 📂 Finderで開く" >&2
+  echo "5. 🌐 GitHubでPRを確認" >&2
+  echo "6. 📊 統計のみ表示して終了" >&2
   echo "" >&2
-  echo "🔗 直接リンク:" >&2
-  echo "   👉 https://github.com/$GH_USERNAME/$project_name/pull/1" >&2
+
+  local choice=""
+  echo -n "選択してください (1-6) [デフォルト: 1]: " >&2
+  read choice
+  choice="${choice:-1}"
+
+  case $choice in
+    1)
+      echo "" >&2
+      echo "🤖 Claudeの作業をリアルタイムで監視します..." >&2
+      monitor_claude_progress "$project_name" "$project_dir/$project_name"
+      ;;
+    2)
+      if command -v cursor >/dev/null 2>&1; then
+        log "🎯 Cursorで開いています..."
+        cursor "$project_dir/$project_name" &
+        echo "✅ Cursorでプロジェクトを開きました！" >&2
+      else
+        warning "Cursorがインストールされていません。VS Codeで開きます..."
+        code "$project_dir/$project_name" &
+      fi
+      ;;
+    3)
+      log "💻 VS Codeで開いています..."
+      code "$project_dir/$project_name" &
+      echo "✅ VS Codeでプロジェクトを開きました！" >&2
+      ;;
+    4)
+      log "📂 Finderで開いています..."
+      open "$project_dir/$project_name" &
+      echo "✅ Finderでフォルダを開きました！" >&2
+      ;;
+    5)
+      log "🌐 GitHubでPRを開いています..."
+      open "https://github.com/$GH_USERNAME/$project_name/pull/1" &
+      echo "✅ ブラウザでPRを開きました！" >&2
+      ;;
+    6)
+      echo "📊 統計のみ表示して終了します。" >&2
+      ;;
+    *)
+      warning "無効な選択です。統計を表示して終了します。"
+      ;;
+  esac
+
   echo "" >&2
-  echo "💡 次のステップ:" >&2
-  echo "   - Finderでプロジェクトフォルダを開く: open '$project_dir/$project_name'" >&2
-  echo "   - VSCodeで開く: code '$project_dir/$project_name'" >&2
-  echo "   - GitHub Desktopで開く: github '$project_dir/$project_name'" >&2
+  echo "💡 いつでも以下のコマンドでアクセスできます:" >&2
+  echo "   cd '$project_dir/$project_name'" >&2
+  echo "   gh pr view 1 --web  # PRをブラウザで開く" >&2
   echo "" >&2
   echo "📊 セットアップログ: $LOG_FILE" >&2
   echo "=========================================" >&2
