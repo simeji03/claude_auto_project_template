@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 set -e
 
-# 🌸 Enhanced curl | bash detection and self-downloading pattern
+# 🌸 Ultimate curl | bash detection and self-downloading pattern
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
-if [[ "$SCRIPT_SOURCE" == "/dev/stdin" ]] || [[ "$SCRIPT_SOURCE" == "/proc/self/fd/0" ]] || [[ ! -f "$SCRIPT_SOURCE" ]] || [[ "$0" == "bash" ]]; then
-  echo "🔄 curl | bash detected. Downloading script to temporary file for safe execution..." >&2
+IS_PIPED=false
+
+# Multiple detection methods for maximum reliability
+if [[ "$SCRIPT_SOURCE" == "/dev/stdin" ]] || \
+   [[ "$SCRIPT_SOURCE" == "/proc/self/fd/0" ]] || \
+   [[ ! -f "$SCRIPT_SOURCE" ]] || \
+   [[ "$0" == "bash" ]] || \
+   [[ "${AUTO_SETUP_SELF_DOWNLOAD:-}" != "done" && ( ! -t 0 || "$SCRIPT_SOURCE" =~ ^/tmp ) ]]; then
+
+  IS_PIPED=true
+fi
+
+if [[ "$IS_PIPED" == "true" && "${AUTO_SETUP_SELF_DOWNLOAD:-}" != "done" ]]; then
+  echo "🔄 curl | bash execution detected. Self-downloading for safe execution..." >&2
 
   # Create temporary file with proper cleanup
   TEMP_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/auto_setup.XXXXXX.sh")
@@ -22,10 +34,11 @@ if [[ "$SCRIPT_SOURCE" == "/dev/stdin" ]] || [[ "$SCRIPT_SOURCE" == "/proc/self/
     exit 1
   fi
 
-  echo "✅ Script downloaded successfully. Executing..." >&2
+  echo "✅ Script downloaded successfully. Executing with proper input handling..." >&2
 
-  # Execute the downloaded script with proper stdin
-  exec bash "$TEMP_SCRIPT" < /dev/tty
+  # Execute the downloaded script with proper environment
+  env AUTO_SETUP_SELF_DOWNLOAD=done bash "$TEMP_SCRIPT"
+  exit $?
 fi
 
 # 🌸 実行環境チェック（既存Gitリポジトリでの実行を防ぐ）
