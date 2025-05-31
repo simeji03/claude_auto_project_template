@@ -1,43 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
-# 🌸 Ultimate curl | bash detection and self-downloading pattern
-SCRIPT_SOURCE="${BASH_SOURCE[0]}"
-IS_PIPED=false
+# 🌸 Professional-grade curl | bash safety with heredoc pattern
+if [[ ! -t 0 ]] && [[ "${AUTO_SETUP_DIRECT_RUN:-}" != "1" ]]; then
+  echo "🔄 Detected piped execution (curl | bash). Switching to safe mode..." >&2
 
-# Multiple detection methods for maximum reliability
-if [[ "$SCRIPT_SOURCE" == "/dev/stdin" ]] || \
-   [[ "$SCRIPT_SOURCE" == "/proc/self/fd/0" ]] || \
-   [[ ! -f "$SCRIPT_SOURCE" ]] || \
-   [[ "$0" == "bash" ]] || \
-   [[ "${AUTO_SETUP_SELF_DOWNLOAD:-}" != "done" && ( ! -t 0 || "$SCRIPT_SOURCE" =~ ^/tmp ) ]]; then
+  # Read the entire script into memory first
+  SCRIPT_CONTENT=$(cat)
 
-  IS_PIPED=true
-fi
-
-if [[ "$IS_PIPED" == "true" && "${AUTO_SETUP_SELF_DOWNLOAD:-}" != "done" ]]; then
-  echo "🔄 curl | bash execution detected. Self-downloading for safe execution..." >&2
-
-  # Create temporary file with proper cleanup
-  TEMP_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/auto_setup.XXXXXX.sh")
-  trap "rm -f '$TEMP_SCRIPT'" EXIT INT TERM
-
-  # Download script to temp file
-  if ! curl -sSL https://raw.githubusercontent.com/simeji03/claude_auto_project_template/main/auto_setup.sh > "$TEMP_SCRIPT"; then
-    echo "❌ Failed to download script. Please check your internet connection." >&2
-    exit 1
-  fi
-
-  # Verify download
-  if [[ ! -s "$TEMP_SCRIPT" ]]; then
-    echo "❌ Downloaded script is empty. Please try again." >&2
-    exit 1
-  fi
-
-  echo "✅ Script downloaded successfully. Executing with proper input handling..." >&2
-
-  # Execute the downloaded script with proper environment
-  env AUTO_SETUP_SELF_DOWNLOAD=done bash "$TEMP_SCRIPT"
+  # Execute with proper stdin
+  env AUTO_SETUP_DIRECT_RUN=1 bash -c "$SCRIPT_CONTENT" < /dev/tty
   exit $?
 fi
 
@@ -51,16 +23,8 @@ fi
 # 🌸 プロジェクト名の入力（検証付き）
 PROJECT=""
 while true; do
-  # Interactive input with explicit terminal handling
-  if [[ -t 0 ]]; then
-    # Standard terminal input
-    echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
-    read PROJECT
-  else
-    # Fallback for non-terminal environments
-    echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
-    read PROJECT < /dev/tty
-  fi
+  echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
+  read PROJECT
 
   # 空文字チェック
   if [[ -z "$PROJECT" ]]; then
