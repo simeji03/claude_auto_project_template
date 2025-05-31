@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 set -e
 
-# 🌸 curl | bash 実行時の標準入力問題を解決
-exec < /dev/tty
+# 🌸 Self-downloading pattern for curl | bash safety
+if [[ "${BASH_SOURCE[0]}" == "/dev/stdin" ]] || [[ "${BASH_SOURCE[0]}" == "/proc/self/fd/0" ]]; then
+  echo "🔄 curl | bash detected. Downloading script to temporary file..." >&2
+
+  # Create temporary file
+  TEMP_SCRIPT=$(mktemp)
+  trap "rm -f '$TEMP_SCRIPT'" EXIT
+
+  # Download script to temp file
+  curl -s https://raw.githubusercontent.com/simeji03/claude_auto_project_template/main/auto_setup.sh > "$TEMP_SCRIPT"
+
+  # Execute the downloaded script
+  exec bash "$TEMP_SCRIPT"
+fi
 
 # 🌸 実行環境チェック（既存Gitリポジトリでの実行を防ぐ）
 if [[ -d ".git" ]]; then
@@ -14,7 +26,8 @@ fi
 # 🌸 プロジェクト名の入力（検証付き）
 PROJECT=""
 while true; do
-  read -rp "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " PROJECT
+  echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
+  read PROJECT
 
   # 空文字チェック
   if [[ -z "$PROJECT" ]]; then
