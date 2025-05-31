@@ -15,12 +15,12 @@ fi
 
 # 🎯 Enterprise-grade logging and error handling
 readonly LOG_FILE="/tmp/auto_setup_$(date +%s).log"
-readonly SCRIPT_VERSION="2.2.0"
+readonly SCRIPT_VERSION="2.2.1"
 readonly REQUIRED_COMMANDS="git gh curl"
 readonly CONFIG_FILE="$HOME/.claude_auto_project_config"
 
 # Advanced error handling with rollback
-readonly CLEANUP_STACK=()
+CLEANUP_STACK=()
 
 # Add cleanup action to stack
 add_cleanup() {
@@ -31,6 +31,10 @@ add_cleanup() {
 
 # Execute all cleanup actions
 execute_cleanup() {
+  if [[ ${#CLEANUP_STACK[@]} -eq 0 ]]; then
+    return 0  # クリーンアップアクションがない場合は何もしない
+  fi
+
   log "⚠️  エラーが発生しました。クリーンアップを実行中..."
 
   # Execute in reverse order
@@ -52,8 +56,15 @@ error_with_rollback() {
   exit 1
 }
 
-# Trap for automatic cleanup on exit
-trap 'execute_cleanup' ERR EXIT
+# Safer trap for automatic cleanup on exit
+cleanup_on_exit() {
+  local exit_code=$?
+  if [[ $exit_code -ne 0 ]] && [[ ${#CLEANUP_STACK[@]} -gt 0 ]]; then
+    execute_cleanup
+  fi
+}
+
+trap 'cleanup_on_exit' EXIT
 
 # Configuration management
 load_config() {
@@ -1005,7 +1016,15 @@ monitor_claude_progress() {
     recent_comments=$(gh api repos/"$GH_USERNAME"/"$project_name"/issues/1/comments --jq '.[].created_at' 2>/dev/null | tail -1)
     if [[ -n "$recent_comments" ]]; then
       local comment_age
-      comment_age=$(date -d "$recent_comments" +%s 2>/dev/null || echo "0")
+      # macOS compatible date calculation
+      if date -d "$recent_comments" +%s >/dev/null 2>&1; then
+        # GNU date (Linux)
+        comment_age=$(date -d "$recent_comments" +%s 2>/dev/null || echo "0")
+      else
+        # BSD date (macOS)
+        comment_age=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$recent_comments" +%s 2>/dev/null || echo "0")
+      fi
+
       local current_time
       current_time=$(date +%s)
       local age_minutes=$(( (current_time - comment_age) / 60 ))

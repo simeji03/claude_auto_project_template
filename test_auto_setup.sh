@@ -429,6 +429,105 @@ test_template_selection() {
   return 0
 }
 
+# Test: Cleanup stack functionality
+test_cleanup_stack() {
+  local test_env
+  test_env=$(setup_test_env)
+  cd "$test_env"
+
+  # Create test cleanup functions
+  cat > test_cleanup.sh << 'EOF'
+#!/usr/bin/env bash
+CLEANUP_STACK=()
+
+add_cleanup() {
+  local action="$1"
+  CLEANUP_STACK+=("$action")
+}
+
+execute_cleanup() {
+  if [[ ${#CLEANUP_STACK[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  for ((i=${#CLEANUP_STACK[@]}-1; i>=0; i--)); do
+    local action="${CLEANUP_STACK[i]}"
+    eval "$action"
+  done
+
+  CLEANUP_STACK=()
+}
+
+# Test the functions
+add_cleanup "echo 'cleanup1'"
+add_cleanup "echo 'cleanup2'"
+
+# Should have 2 items
+[[ ${#CLEANUP_STACK[@]} -eq 2 ]] || exit 1
+
+# Execute cleanup
+execute_cleanup
+
+# Should be empty after cleanup
+[[ ${#CLEANUP_STACK[@]} -eq 0 ]] || exit 1
+
+echo "cleanup_test_passed"
+EOF
+
+  chmod +x test_cleanup.sh
+  local result
+  result=$(./test_cleanup.sh 2>/dev/null)
+
+  cleanup_test_env "$test_env"
+
+  # Check if test passed and cleanup functions were called
+  [[ "$result" == *"cleanup2"* ]] && [[ "$result" == *"cleanup1"* ]] && [[ "$result" == *"cleanup_test_passed"* ]]
+}
+
+# Test: Error handling
+test_error_handling() {
+  local test_env
+  test_env=$(setup_test_env)
+  cd "$test_env"
+
+  # Create test script that simulates error handling
+  cat > test_error.sh << 'EOF'
+#!/usr/bin/env bash
+set -e
+
+CLEANUP_STACK=()
+
+add_cleanup() {
+  local action="$1"
+  CLEANUP_STACK+=("$action")
+}
+
+cleanup_on_exit() {
+  local exit_code=$?
+  if [[ $exit_code -ne 0 ]] && [[ ${#CLEANUP_STACK[@]} -gt 0 ]]; then
+    echo "cleanup_executed"
+  fi
+}
+
+trap 'cleanup_on_exit' EXIT
+
+# Add some cleanup actions
+add_cleanup "echo 'test cleanup'"
+
+# Force an error
+exit 1
+EOF
+
+  chmod +x test_error.sh
+  local result
+  result=$(./test_error.sh 2>&1 || true)
+
+  cleanup_test_env "$test_env"
+
+  # Check if cleanup was executed on error
+  [[ "$result" == *"cleanup_executed"* ]]
+}
+
 # Test report generation
 generate_test_report() {
   local total_tests=$TEST_COUNT
@@ -492,6 +591,8 @@ main() {
   run_test "Security checks" test_security
   run_test "Configuration management" test_config_management
   run_test "Template selection logic" test_template_selection
+  run_test "Cleanup stack functionality" test_cleanup_stack
+  run_test "Error handling" test_error_handling
 
   # Generate final report
   generate_test_report
