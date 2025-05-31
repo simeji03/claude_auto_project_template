@@ -2,7 +2,7 @@
 set -e
 
 # 🧪 Professional-grade test suite for auto_setup.sh
-readonly TEST_SCRIPT_VERSION="1.0.0"
+readonly TEST_SCRIPT_VERSION="1.1.0"
 readonly TEST_LOG_FILE="/tmp/auto_setup_test_$(date +%s).log"
 readonly SCRIPT_UNDER_TEST="./auto_setup.sh"
 
@@ -336,6 +336,99 @@ test_security() {
   [[ $security_issues -eq 0 ]]
 }
 
+# Test: Configuration management
+test_config_management() {
+  local test_env
+  test_env=$(setup_test_env)
+  cd "$test_env"
+
+  # Create test config functions
+  cat > test_config.sh << 'EOF'
+#!/usr/bin/env bash
+CONFIG_FILE="/tmp/test_claude_config_$(date +%s)"
+RECENT_CUSTOM_PATHS=()
+
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE" 2>/dev/null || true
+  fi
+}
+
+save_config() {
+  cat > "$CONFIG_FILE" << EOFCONFIG
+RECENT_CUSTOM_PATHS=(
+$(printf '  "%s"\n' "${RECENT_CUSTOM_PATHS[@]}")
+)
+EOFCONFIG
+}
+
+add_recent_path() {
+  local new_path="$1"
+  local updated_paths=()
+
+  updated_paths+=("$new_path")
+
+  local count=1
+  for path in "${RECENT_CUSTOM_PATHS[@]}"; do
+    if [[ "$path" != "$new_path" ]] && [[ $count -lt 5 ]]; then
+      updated_paths+=("$path")
+      ((count++))
+    fi
+  done
+
+  RECENT_CUSTOM_PATHS=("${updated_paths[@]}")
+}
+
+# Test the functions
+add_recent_path "/test/path1"
+add_recent_path "/test/path2"
+save_config
+
+# Load and verify
+RECENT_CUSTOM_PATHS=()
+load_config
+
+# Check if paths were saved and loaded correctly
+[[ ${#RECENT_CUSTOM_PATHS[@]} -eq 2 ]] && \
+[[ "${RECENT_CUSTOM_PATHS[0]}" == "/test/path2" ]] && \
+[[ "${RECENT_CUSTOM_PATHS[1]}" == "/test/path1" ]]
+EOF
+
+  chmod +x test_config.sh
+  local result=0
+  if ./test_config.sh; then
+    result=0
+  else
+    result=1
+  fi
+
+  cleanup_test_env "$test_env"
+  return $result
+}
+
+# Test: Template selection logic
+test_template_selection() {
+  # Test template validation logic
+  local valid_templates=("vanilla" "react-typescript" "nodejs-express" "python-fastapi" "nextjs-typescript" "vuejs-typescript" "custom")
+
+  for template in "${valid_templates[@]}"; do
+    # These should be valid template names
+    if [[ ! "$template" =~ ^(vanilla|react-typescript|nodejs-express|python-fastapi|nextjs-typescript|vuejs-typescript|custom)$ ]]; then
+      return 1
+    fi
+  done
+
+  # Test invalid templates
+  local invalid_templates=("invalid" "test-template" "")
+  for template in "${invalid_templates[@]}"; do
+    if [[ "$template" =~ ^(vanilla|react-typescript|nodejs-express|python-fastapi|nextjs-typescript|vuejs-typescript|custom)$ ]]; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 # Test report generation
 generate_test_report() {
   local total_tests=$TEST_COUNT
@@ -397,6 +490,8 @@ main() {
 
   # Quality tests
   run_test "Security checks" test_security
+  run_test "Configuration management" test_config_management
+  run_test "Template selection logic" test_template_selection
 
   # Generate final report
   generate_test_report

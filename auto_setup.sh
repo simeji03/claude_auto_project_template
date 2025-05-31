@@ -15,8 +15,100 @@ fi
 
 # 🎯 Enterprise-grade logging and error handling
 readonly LOG_FILE="/tmp/auto_setup_$(date +%s).log"
-readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_VERSION="2.1.0"
 readonly REQUIRED_COMMANDS="git gh curl"
+readonly CONFIG_FILE="$HOME/.claude_auto_project_config"
+
+# Advanced error handling with rollback
+readonly CLEANUP_STACK=()
+
+# Add cleanup action to stack
+add_cleanup() {
+  local action="$1"
+  CLEANUP_STACK+=("$action")
+  log "クリーンアップアクションを追加: $action"
+}
+
+# Execute all cleanup actions
+execute_cleanup() {
+  log "⚠️  エラーが発生しました。クリーンアップを実行中..."
+
+  # Execute in reverse order
+  for ((i=${#CLEANUP_STACK[@]}-1; i>=0; i--)); do
+    local action="${CLEANUP_STACK[i]}"
+    log "クリーンアップ実行: $action"
+    eval "$action" || warning "クリーンアップアクションが失敗: $action"
+  done
+
+  CLEANUP_STACK=()
+  log "クリーンアップが完了しました"
+}
+
+# Enhanced error function with rollback
+error_with_rollback() {
+  local message="$*"
+  log "❌ エラー: $message"
+  execute_cleanup
+  exit 1
+}
+
+# Trap for automatic cleanup on exit
+trap 'execute_cleanup' ERR EXIT
+
+# Configuration management
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE" 2>/dev/null || true
+  fi
+}
+
+save_config() {
+  cat > "$CONFIG_FILE" << EOF
+# Claude Auto Project Template Configuration
+# Last updated: $(date)
+
+# Recent custom paths (most recent first)
+RECENT_CUSTOM_PATHS=(
+$(printf '  "%s"\n' "${RECENT_CUSTOM_PATHS[@]}")
+)
+
+# User preferences
+DEFAULT_PROJECT_LOCATION="${DEFAULT_PROJECT_LOCATION:-}"
+PREFERRED_LICENSE="${PREFERRED_LICENSE:-MIT}"
+DEFAULT_VISIBILITY="${DEFAULT_VISIBILITY:-private}"
+
+# Project statistics
+PROJECT_COUNT=${PROJECT_COUNT:-0}
+LAST_PROJECT_DATE="${LAST_PROJECT_DATE:-}"
+LAST_PROJECT_NAME="${LAST_PROJECT_NAME:-}"
+TOTAL_PRIVATE_REPOS=${TOTAL_PRIVATE_REPOS:-0}
+TOTAL_PUBLIC_REPOS=${TOTAL_PUBLIC_REPOS:-0}
+
+# Template usage statistics
+$(declare -p TEMPLATE_STATS 2>/dev/null || echo "declare -A TEMPLATE_STATS=()")
+EOF
+  success "設定が保存されました: $CONFIG_FILE"
+}
+
+# Add custom path to recent list
+add_recent_path() {
+  local new_path="$1"
+  local updated_paths=()
+
+  # Add new path first
+  updated_paths+=("$new_path")
+
+  # Add existing paths (except duplicates, max 5)
+  local count=1
+  for path in "${RECENT_CUSTOM_PATHS[@]}"; do
+    if [[ "$path" != "$new_path" ]] && [[ $count -lt 5 ]]; then
+      updated_paths+=("$path")
+      ((count++))
+    fi
+  done
+
+  RECENT_CUSTOM_PATHS=("${updated_paths[@]}")
+}
 
 # Logging functions
 log() {
@@ -272,11 +364,19 @@ EOF
 # Create GitHub repository with robust error handling
 create_github_repo() {
   local project_name="$1"
+  local visibility="$2"
 
   log "GitHubリポジトリを作成中..."
 
   # Create repository with retry
-  retry 3 2 "gh repo create '$project_name' --private --clone=false --description 'Claude統合により自動生成されたプロジェクト'"
+  local visibility_flag=""
+  if [[ "$visibility" == "public" ]]; then
+    visibility_flag="--public"
+  else
+    visibility_flag="--private"
+  fi
+
+  retry 3 2 "gh repo create '$project_name' $visibility_flag --clone=false --description 'Claude統合により自動生成されたプロジェクト'"
 
   # Add remote
   retry 3 1 "git remote add origin https://github.com/$GH_USERNAME/$project_name.git"
@@ -286,7 +386,7 @@ create_github_repo() {
     error "リモートoriginの追加に失敗しました"
   fi
 
-  success "GitHubリポジトリが作成されました: $GH_USERNAME/$project_name"
+  success "GitHubリポジトリが作成されました: $GH_USERNAME/$project_name ($visibility)"
 }
 
 # Setup GitHub secrets
@@ -373,6 +473,8 @@ EOF
 # Trigger Claude automatically
 trigger_claude() {
   local project_name="$1"
+  local template="$2"
+  local license="$3"
 
   log "Claudeの自動コード生成をトリガー中..."
 
@@ -380,16 +482,105 @@ trigger_claude() {
   local pr_number
   pr_number=$(gh pr view feat/initial-development --json number --jq .number 2>/dev/null) || error "PR番号の取得に失敗しました"
 
-  # Post Claude comment
-  retry 3 2 "gh api repos/$GH_USERNAME/$project_name/issues/$pr_number/comments -f body='@claude 以下の機能を持つシンプルな自動返信アプリケーションを構築してください:
-
-## 要件
+  # Generate template-specific instructions
+  local template_instructions=""
+  case $template in
+    "react-typescript")
+      template_instructions="
+## 技術要件
+- React 18+ with TypeScript
+- Vite for build tool
+- ESLint + Prettier configuration
+- React Router for navigation
+- Styled-components or Tailwind CSS
+- Jest + React Testing Library for testing"
+      ;;
+    "nodejs-express")
+      template_instructions="
+## 技術要件
+- Node.js with Express.js
+- TypeScript configuration
+- ESLint + Prettier setup
+- Jest for testing
+- Docker configuration
+- API documentation with Swagger"
+      ;;
+    "python-fastapi")
+      template_instructions="
+## 技術要件
+- Python 3.8+ with FastAPI
+- Poetry for dependency management
+- Pydantic for data validation
+- pytest for testing
+- uvicorn for ASGI server
+- Docker configuration"
+      ;;
+    "nextjs-typescript")
+      template_instructions="
+## 技術要件
+- Next.js 14+ with TypeScript
+- Tailwind CSS for styling
+- ESLint + Prettier configuration
+- Jest + Testing Library
+- Vercel deployment ready"
+      ;;
+    "vuejs-typescript")
+      template_instructions="
+## 技術要件
+- Vue.js 3+ with TypeScript
+- Vite for build tool
+- Vue Router + Pinia
+- Vitest for testing
+- ESLint + Prettier setup"
+      ;;
+    "custom")
+      template_instructions="
+## 技術要件
+- 最適な技術スタックを提案してください
+- モダンなベストプラクティスを適用
+- 完全なプロジェクト構造を作成"
+      ;;
+    *)
+      template_instructions="
+## 技術要件
 - シンプルで分かりやすいアーキテクチャ
-- 自動返信機能
+- モダンなベストプラクティス
+- 適切なプロジェクト構造"
+      ;;
+  esac
+
+  local license_note=""
+  if [[ "$license" != "none" ]]; then
+    license_note="
+## ライセンス
+- $license ライセンスファイルを作成してください"
+  fi
+
+  # Post Claude comment
+  retry 3 2 "gh api repos/$GH_USERNAME/$project_name/issues/$pr_number/comments -f body='@claude 以下の要件で完全なアプリケーションを構築してください:
+
+## プロジェクト概要
+プロジェクト名: $project_name
+テンプレート: $template
+
+$template_instructions
+
+## 基本要件
+- 自動返信機能またはプロジェクト固有の機能
 - モダンなUI/UX
 - 適切なエラーハンドリング
-- ドキュメント
-- テスト
+- 包括的なドキュメント
+- 単体テスト
+- 本番対応の設定
+
+$license_note
+
+## 品質要件
+- TypeScriptを使用（該当する場合）
+- ESLint/Prettier設定
+- CI/CD ready
+- Docker対応（該当する場合）
+- 詳細なREADME
 
 完全な本番対応アプリケーションを作成してください。よろしくお願いします！'"
 
@@ -404,12 +595,29 @@ get_project_directory() {
   echo "2. ~/Desktop/" >&2
   echo "3. ~/Documents/" >&2
   echo "4. 現在のディレクトリ ($PWD)" >&2
-  echo "5. カスタムパス" >&2
+
+  # Show recent custom paths if available
+  local option_count=5
+  if [[ ${#RECENT_CUSTOM_PATHS[@]} -gt 0 ]]; then
+    echo "--- 最近使用したカスタムパス ---" >&2
+    local i=0
+    for path in "${RECENT_CUSTOM_PATHS[@]}"; do
+      if [[ $i -lt 3 ]]; then  # Show max 3 recent paths
+        echo "$option_count. $path" >&2
+        ((option_count++))
+        ((i++))
+      fi
+    done
+    echo "--- ---" >&2
+  fi
+
+  echo "$option_count. 新しいカスタムパス" >&2
+  local custom_option=$option_count
   echo "" >&2
 
   local choice=""
   while true; do
-    echo -n "選択してください (1-5): " >&2
+    echo -n "選択してください (1-$option_count): " >&2
     read choice
 
     case $choice in
@@ -429,26 +637,279 @@ get_project_directory() {
         echo "$PWD"
         return 0
         ;;
-      5)
-        echo -n "カスタムパスを入力してください: " >&2
-        read custom_path
-        if [[ -d "$custom_path" ]] || mkdir -p "$custom_path" 2>/dev/null; then
-          echo "$custom_path"
-          return 0
-        else
-          warning "無効なパスです: $custom_path"
+      5|6|7)
+        # Check if it's a recent custom path
+        local recent_index=$((choice - 5))
+        if [[ $recent_index -lt ${#RECENT_CUSTOM_PATHS[@]} ]]; then
+          local selected_path="${RECENT_CUSTOM_PATHS[$recent_index]}"
+          if [[ -d "$selected_path" ]] || mkdir -p "$selected_path" 2>/dev/null; then
+            echo "$selected_path"
+            return 0
+          else
+            warning "パスにアクセスできません: $selected_path"
+          fi
+        elif [[ $choice -eq $custom_option ]]; then
+          # New custom path
+          echo -n "新しいカスタムパスを入力してください: " >&2
+          read custom_path
+
+          # Expand tilde
+          custom_path="${custom_path/#\~/$HOME}"
+
+          if [[ -z "$custom_path" ]]; then
+            warning "パスが入力されていません。"
+            continue
+          fi
+
+          if [[ -d "$custom_path" ]] || mkdir -p "$custom_path" 2>/dev/null; then
+            add_recent_path "$custom_path"
+            save_config
+            success "カスタムパスを保存しました: $custom_path"
+            echo "$custom_path"
+            return 0
+          else
+            warning "無効なパスまたは作成できません: $custom_path"
+          fi
         fi
         ;;
       *)
-        warning "無効な選択です。1-5の数字を入力してください。"
+        warning "無効な選択です。1-$option_count の数字を入力してください。"
         ;;
     esac
   done
 }
 
+# Project template selection
+get_project_template() {
+  echo "" >&2
+  echo "🎨 プロジェクトテンプレートを選択してください:" >&2
+  echo "1. Vanilla (基本テンプレート)" >&2
+  echo "2. React + TypeScript" >&2
+  echo "3. Node.js + Express" >&2
+  echo "4. Python + FastAPI" >&2
+  echo "5. Next.js + TypeScript" >&2
+  echo "6. Vue.js + TypeScript" >&2
+  echo "7. カスタム（Claudeに相談）" >&2
+  echo "" >&2
+
+  local choice=""
+  while true; do
+    echo -n "選択してください (1-7): " >&2
+    read choice
+
+    case $choice in
+      1)
+        echo "vanilla"
+        return 0
+        ;;
+      2)
+        echo "react-typescript"
+        return 0
+        ;;
+      3)
+        echo "nodejs-express"
+        return 0
+        ;;
+      4)
+        echo "python-fastapi"
+        return 0
+        ;;
+      5)
+        echo "nextjs-typescript"
+        return 0
+        ;;
+      6)
+        echo "vuejs-typescript"
+        return 0
+        ;;
+      7)
+        echo "custom"
+        return 0
+        ;;
+      *)
+        warning "無効な選択です。1-7の数字を入力してください。"
+        ;;
+    esac
+  done
+}
+
+# License selection
+get_project_license() {
+  echo "" >&2
+  echo "📄 ライセンスを選択してください:" >&2
+  echo "1. MIT (推奨 - 最も自由度が高い)" >&2
+  echo "2. Apache 2.0 (特許保護付き)" >&2
+  echo "3. GPL v3 (コピーレフト)" >&2
+  echo "4. BSD 3-Clause" >&2
+  echo "5. ISC" >&2
+  echo "6. Unlicense (パブリックドメイン)" >&2
+  echo "7. ライセンスなし" >&2
+  echo "" >&2
+
+  local choice="${PREFERRED_LICENSE:-1}"
+  echo -n "選択してください (1-7) [デフォルト: $choice]: " >&2
+  read user_choice
+
+  choice="${user_choice:-$choice}"
+
+  case $choice in
+    1|"MIT")
+      echo "MIT"
+      return 0
+      ;;
+    2|"Apache")
+      echo "Apache-2.0"
+      return 0
+      ;;
+    3|"GPL")
+      echo "GPL-3.0"
+      return 0
+      ;;
+    4|"BSD")
+      echo "BSD-3-Clause"
+      return 0
+      ;;
+    5|"ISC")
+      echo "ISC"
+      return 0
+      ;;
+    6|"Unlicense")
+      echo "Unlicense"
+      return 0
+      ;;
+    7|"none")
+      echo "none"
+      return 0
+      ;;
+    *)
+      warning "無効な選択です。MITライセンスを使用します。"
+      echo "MIT"
+      return 0
+      ;;
+  esac
+}
+
+# Repository visibility selection
+get_repository_visibility() {
+  echo "" >&2
+  echo "🔒 リポジトリの可視性を選択してください:" >&2
+  echo "1. Private (非公開 - 推奨)" >&2
+  echo "2. Public (公開)" >&2
+  echo "" >&2
+
+  local choice="${DEFAULT_VISIBILITY:-private}"
+  if [[ "$choice" == "private" ]]; then
+    local default_num="1"
+  else
+    local default_num="2"
+  fi
+
+  echo -n "選択してください (1-2) [デフォルト: $default_num]: " >&2
+  read user_choice
+
+  user_choice="${user_choice:-$default_num}"
+
+  case $user_choice in
+    1|"private")
+      echo "private"
+      return 0
+      ;;
+    2|"public")
+      echo "public"
+      return 0
+      ;;
+    *)
+      warning "無効な選択です。Privateを使用します。"
+      echo "private"
+      return 0
+      ;;
+  esac
+}
+
+# Update project statistics
+update_project_stats() {
+  local project_name="$1"
+  local template="$2"
+  local license="$3"
+  local visibility="$4"
+
+  # Initialize stats if not exists
+  if [[ -z "$PROJECT_COUNT" ]]; then
+    PROJECT_COUNT=0
+  fi
+
+  if [[ -z "$TEMPLATE_STATS" ]]; then
+    declare -A TEMPLATE_STATS
+  fi
+
+  # Update counters
+  ((PROJECT_COUNT++))
+  TEMPLATE_STATS["$template"]=$((${TEMPLATE_STATS["$template"]:-0} + 1))
+  LAST_PROJECT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+  LAST_PROJECT_NAME="$project_name"
+
+  # Update total stats
+  TOTAL_PRIVATE_REPOS=$((${TOTAL_PRIVATE_REPOS:-0} + $([ "$visibility" = "private" ] && echo 1 || echo 0)))
+  TOTAL_PUBLIC_REPOS=$((${TOTAL_PUBLIC_REPOS:-0} + $([ "$visibility" = "public" ] && echo 1 || echo 0)))
+
+  success "プロジェクト統計を更新しました (総計: $PROJECT_COUNT プロジェクト)"
+}
+
+# Show project statistics
+show_project_stats() {
+  if [[ "$PROJECT_COUNT" -gt 0 ]]; then
+    echo "" >&2
+    echo "📊 プロジェクト統計:" >&2
+    echo "   総プロジェクト数: $PROJECT_COUNT" >&2
+    echo "   最新プロジェクト: $LAST_PROJECT_NAME ($LAST_PROJECT_DATE)" >&2
+    echo "   プライベートリポジトリ: ${TOTAL_PRIVATE_REPOS:-0}" >&2
+    echo "   パブリックリポジトリ: ${TOTAL_PUBLIC_REPOS:-0}" >&2
+
+    if [[ ${#TEMPLATE_STATS[@]} -gt 0 ]]; then
+      echo "   使用テンプレート:" >&2
+      for template in "${!TEMPLATE_STATS[@]}"; do
+        echo "     - $template: ${TEMPLATE_STATS[$template]} 回" >&2
+      done
+    fi
+    echo "" >&2
+  fi
+}
+
+# Enhanced validation with detailed error messages
+validate_environment() {
+  log "🔍 環境検証を実行中..."
+
+  # Check disk space (require at least 100MB)
+  local available_space
+  available_space=$(df "$PWD" | tail -1 | awk '{print $4}')
+  if [[ $available_space -lt 102400 ]]; then  # 100MB in KB
+    error_with_rollback "ディスク容量が不足しています。最低100MB必要です。"
+  fi
+
+  # Check network connectivity
+  if ! curl -s --connect-timeout 5 "https://api.github.com" >/dev/null; then
+    error_with_rollback "GitHub APIへの接続に失敗しました。ネットワーク接続を確認してください。"
+  fi
+
+  # Check GitHub API rate limit
+  local rate_limit
+  rate_limit=$(gh api rate_limit --jq '.rate.remaining' 2>/dev/null || echo "0")
+  if [[ $rate_limit -lt 10 ]]; then
+    error_with_rollback "GitHub API レート制限に近づいています。残り: $rate_limit 回"
+  fi
+
+  success "環境検証が完了しました"
+}
+
 # Main execution function
 main() {
   log "🚀 Claude自動プロジェクトセットアップ v$SCRIPT_VERSION を開始"
+
+  # Load user configuration
+  load_config
+
+  # Enhanced environment validation
+  validate_environment
 
   # Check if running in existing Git repo
   if [[ -d ".git" ]]; then
@@ -466,9 +927,21 @@ main() {
 
   check_conflicts "$project_name" "$project_dir"
 
-  setup_local_project "$project_name" "$project_dir"
+  local template
+  template=$(get_project_template)
 
-  create_github_repo "$project_name"
+  local license
+  license=$(get_project_license)
+
+  local visibility
+  visibility=$(get_repository_visibility)
+
+  # Setup with cleanup tracking
+  setup_local_project "$project_name" "$project_dir"
+  add_cleanup "rm -rf '$project_dir/$project_name' 2>/dev/null || true"
+
+  create_github_repo "$project_name" "$visibility"
+  add_cleanup "gh repo delete '$GH_USERNAME/$project_name' --yes 2>/dev/null || true"
 
   setup_github_secrets "$project_name"
 
@@ -476,7 +949,19 @@ main() {
 
   create_feature_pr "$project_name"
 
-  trigger_claude "$project_name"
+  trigger_claude "$project_name" "$template" "$license"
+
+  # Update project statistics
+  update_project_stats "$project_name" "$template" "$license" "$visibility"
+
+  # Save configuration with new stats
+  save_config
+
+  # Show project statistics
+  show_project_stats
+
+  # Clear cleanup stack on success
+  CLEANUP_STACK=()
 
   # Final success message
   log "🎉 成功: $project_name の準備が完了しました！"
