@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# 🚀 Claude Auto Project Template - One Command Setup
+# Usage: newapp
+# Or: curl -s https://raw.githubusercontent.com/simeji03/claude_auto_project_template/main/auto_setup.sh | bash
+
+set -e
+
+# 🌟 Welcome message
+echo "🚀 Claude Auto Project Template"
+echo "   Professional-grade project setup with AI integration"
+echo ""
+
+# 🔗 Download and execute the latest auto_setup.sh
+curl -s https://raw.githubusercontent.com/simeji03/claude_auto_project_template/main/auto_setup.sh | bash
