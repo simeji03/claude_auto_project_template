@@ -80,7 +80,7 @@ check_prerequisites() {
 
   # Check GitHub token permissions
   local token_scopes
-  token_scopes=$(gh auth status 2>&1 | grep "Token scopes:" | cut -d"'" -f2) || error "トークンスコープの取得に失敗しました"
+  token_scopes=$(gh auth status 2>&1 | grep "Token scopes:" | sed "s/.*Token scopes: '\(.*\)'.*/\1/") || error "トークンスコープの取得に失敗しました"
 
   for required_scope in "repo" "workflow"; do
     if [[ ! "$token_scopes" =~ $required_scope ]]; then
@@ -88,7 +88,9 @@ check_prerequisites() {
 
 🔧 解決方法:
 以下のコマンドを実行して再認証してください:
-gh auth login --scopes repo,workflow"
+gh auth login --scopes repo,workflow
+
+🔍 現在のスコープ: $token_scopes"
     fi
   done
 
