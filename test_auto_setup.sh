@@ -528,6 +528,65 @@ EOF
   [[ "$result" == *"cleanup_executed"* ]]
 }
 
+# Test: Notification configuration
+test_notification_config() {
+  local test_env
+  test_env=$(setup_test_env)
+  cd "$test_env"
+
+  # Create test notification functions
+  cat > test_notifications.sh << 'EOF'
+#!/usr/bin/env bash
+
+# Test notification method validation
+test_macos_available() {
+  if command -v osascript >/dev/null 2>&1; then
+    echo "macos_available"
+  fi
+}
+
+test_email_validation() {
+  local email="test@example.com"
+  if [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+    echo "email_valid"
+  fi
+}
+
+test_slack_url_validation() {
+  local url="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+  if [[ "$url" =~ ^https://hooks.slack.com/services/ ]]; then
+    echo "slack_url_valid"
+  fi
+}
+
+test_discord_url_validation() {
+  local url="https://discord.com/api/webhooks/123456789/abcdefghijklmnopqrstuvwxyz"
+  if [[ "$url" =~ ^https://discord.com/api/webhooks/ ]]; then
+    echo "discord_url_valid"
+  fi
+}
+
+# Run tests
+test_macos_available
+test_email_validation
+test_slack_url_validation
+test_discord_url_validation
+echo "notification_tests_passed"
+EOF
+
+  chmod +x test_notifications.sh
+  local result
+  result=$(./test_notifications.sh 2>/dev/null)
+
+  cleanup_test_env "$test_env"
+
+  # Check if all validations work
+  [[ "$result" == *"email_valid"* ]] && \
+  [[ "$result" == *"slack_url_valid"* ]] && \
+  [[ "$result" == *"discord_url_valid"* ]] && \
+  [[ "$result" == *"notification_tests_passed"* ]]
+}
+
 # Test report generation
 generate_test_report() {
   local total_tests=$TEST_COUNT
@@ -593,6 +652,7 @@ main() {
   run_test "Template selection logic" test_template_selection
   run_test "Cleanup stack functionality" test_cleanup_stack
   run_test "Error handling" test_error_handling
+  run_test "Notification configuration" test_notification_config
 
   # Generate final report
   generate_test_report

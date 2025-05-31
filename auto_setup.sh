@@ -15,7 +15,7 @@ fi
 
 # 🎯 Enterprise-grade logging and error handling
 readonly LOG_FILE="/tmp/auto_setup_$(date +%s).log"
-readonly SCRIPT_VERSION="2.2.1"
+readonly SCRIPT_VERSION="2.3.0"
 readonly REQUIRED_COMMANDS="git gh curl"
 readonly CONFIG_FILE="$HOME/.claude_auto_project_config"
 
@@ -87,6 +87,14 @@ $(printf '  "%s"\n' "${RECENT_CUSTOM_PATHS[@]}")
 DEFAULT_PROJECT_LOCATION="${DEFAULT_PROJECT_LOCATION:-}"
 PREFERRED_LICENSE="${PREFERRED_LICENSE:-MIT}"
 DEFAULT_VISIBILITY="${DEFAULT_VISIBILITY:-private}"
+
+# Notification preferences
+NOTIFICATION_ENABLED="${NOTIFICATION_ENABLED:-}"
+NOTIFICATION_METHOD="${NOTIFICATION_METHOD:-}"
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+EMAIL_ADDRESS="${EMAIL_ADDRESS:-}"
+NOTIFICATION_SOUND="${NOTIFICATION_SOUND:-true}"
 
 # Project statistics
 PROJECT_COUNT=${PROJECT_COUNT:-0}
@@ -992,6 +1000,11 @@ monitor_claude_progress() {
         # Open in preferred editor
         open_in_editor "$project_dir"
 
+        # Send completion notification
+        local project_name_display
+        project_name_display=$(basename "$project_dir")
+        send_notification "🎉 プロジェクト完了" "Claudeが '$project_name_display' の開発を完了しました！エディタで確認してください。" "success"
+
         # Show success message
         echo "🎉 同期完了！以下で開発を続行できます:" >&2
         echo "" >&2
@@ -1061,6 +1074,318 @@ open_in_editor() {
   fi
 }
 
+# Notification setup
+setup_notifications() {
+  if [[ -n "$NOTIFICATION_ENABLED" ]]; then
+    return 0  # 既に設定済み
+  fi
+
+  echo "" >&2
+  echo "🔔 通知設定をセットアップしましょう:" >&2
+  echo "Claudeの作業完了時に通知を受け取りますか？" >&2
+  echo "" >&2
+  echo "1. はい - 通知を設定する" >&2
+  echo "2. いいえ - 通知なし" >&2
+  echo "3. 後で設定する" >&2
+  echo "" >&2
+
+  local choice=""
+  echo -n "選択してください (1-3): " >&2
+  read choice
+
+  case $choice in
+    1)
+      configure_notification_method
+      ;;
+    2)
+      NOTIFICATION_ENABLED="false"
+      success "通知を無効にしました"
+      ;;
+    3)
+      NOTIFICATION_ENABLED="later"
+      log "通知設定をスキップしました"
+      ;;
+    *)
+      NOTIFICATION_ENABLED="later"
+      warning "無効な選択です。通知設定をスキップします"
+      ;;
+  esac
+}
+
+# Configure notification method
+configure_notification_method() {
+  echo "" >&2
+  echo "🔔 通知方法を選択してください:" >&2
+  echo "1. macOS通知センター (推奨)" >&2
+  echo "2. Slack通知" >&2
+  echo "3. Discord通知" >&2
+  echo "4. メール通知" >&2
+  echo "5. 音声通知のみ" >&2
+  echo "" >&2
+
+  local method_choice=""
+  echo -n "選択してください (1-5): " >&2
+  read method_choice
+
+  case $method_choice in
+    1)
+      if command -v osascript >/dev/null 2>&1; then
+        NOTIFICATION_METHOD="macos"
+        NOTIFICATION_ENABLED="true"
+        success "macOS通知センターを設定しました"
+      else
+        warning "macOSではありません。別の方法を選択してください"
+        configure_notification_method
+      fi
+      ;;
+    2)
+      setup_slack_notification
+      ;;
+    3)
+      setup_discord_notification
+      ;;
+    4)
+      setup_email_notification
+      ;;
+    5)
+      NOTIFICATION_METHOD="sound"
+      NOTIFICATION_ENABLED="true"
+      success "音声通知を設定しました"
+      ;;
+    *)
+      warning "無効な選択です。macOS通知センターを使用します"
+      NOTIFICATION_METHOD="macos"
+      NOTIFICATION_ENABLED="true"
+      ;;
+  esac
+}
+
+# Setup Slack notification
+setup_slack_notification() {
+  echo "" >&2
+  echo "📱 Slack Webhook URLを入力してください:" >&2
+  echo "   (Slack App > Incoming Webhooks から取得)" >&2
+  echo "" >&2
+  echo -n "Webhook URL: " >&2
+  read slack_url
+
+  if [[ "$slack_url" =~ ^https://hooks.slack.com/services/ ]]; then
+    SLACK_WEBHOOK_URL="$slack_url"
+    NOTIFICATION_METHOD="slack"
+    NOTIFICATION_ENABLED="true"
+    success "Slack通知を設定しました"
+
+    # Test notification
+    send_notification "🧪 テスト通知" "Claude Auto Project Template の通知設定が完了しました！" "test"
+  else
+    warning "無効なSlack Webhook URLです"
+    setup_slack_notification
+  fi
+}
+
+# Setup Discord notification
+setup_discord_notification() {
+  echo "" >&2
+  echo "💬 Discord Webhook URLを入力してください:" >&2
+  echo "   (サーバー設定 > 連携サービス > ウェブフック から作成)" >&2
+  echo "" >&2
+  echo -n "Webhook URL: " >&2
+  read discord_url
+
+  if [[ "$discord_url" =~ ^https://discord.com/api/webhooks/ ]]; then
+    DISCORD_WEBHOOK_URL="$discord_url"
+    NOTIFICATION_METHOD="discord"
+    NOTIFICATION_ENABLED="true"
+    success "Discord通知を設定しました"
+
+    # Test notification
+    send_notification "🧪 テスト通知" "Claude Auto Project Template の通知設定が完了しました！" "test"
+  else
+    warning "無効なDiscord Webhook URLです"
+    setup_discord_notification
+  fi
+}
+
+# Setup email notification
+setup_email_notification() {
+  echo "" >&2
+  echo "📧 メールアドレスを入力してください:" >&2
+  echo "" >&2
+  echo -n "Email: " >&2
+  read email
+
+  if [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+    EMAIL_ADDRESS="$email"
+    NOTIFICATION_METHOD="email"
+    NOTIFICATION_ENABLED="true"
+    success "メール通知を設定しました"
+
+    # Check if mail command is available
+    if ! command -v mail >/dev/null 2>&1; then
+      warning "mailコマンドが見つかりません。システム設定を確認してください"
+    fi
+  else
+    warning "無効なメールアドレスです"
+    setup_email_notification
+  fi
+}
+
+# Send notification
+send_notification() {
+  local title="$1"
+  local message="$2"
+  local type="${3:-success}"  # success, error, info, test
+
+  if [[ "$NOTIFICATION_ENABLED" != "true" ]]; then
+    return 0
+  fi
+
+  # Play sound if enabled
+  if [[ "$NOTIFICATION_SOUND" == "true" ]]; then
+    case $type in
+      "success")
+        # Success sound
+        if command -v afplay >/dev/null 2>&1; then
+          afplay /System/Library/Sounds/Glass.aiff >/dev/null 2>&1 &
+        fi
+        ;;
+      "error")
+        # Error sound
+        if command -v afplay >/dev/null 2>&1; then
+          afplay /System/Library/Sounds/Sosumi.aiff >/dev/null 2>&1 &
+        fi
+        ;;
+    esac
+  fi
+
+  case $NOTIFICATION_METHOD in
+    "macos")
+      send_macos_notification "$title" "$message" "$type"
+      ;;
+    "slack")
+      send_slack_notification "$title" "$message" "$type"
+      ;;
+    "discord")
+      send_discord_notification "$title" "$message" "$type"
+      ;;
+    "email")
+      send_email_notification "$title" "$message" "$type"
+      ;;
+    "sound")
+      # Sound only, already played above
+      ;;
+  esac
+}
+
+# macOS notification
+send_macos_notification() {
+  local title="$1"
+  local message="$2"
+  local type="$3"
+
+  local icon=""
+  case $type in
+    "success") icon="✅" ;;
+    "error") icon="❌" ;;
+    "info") icon="ℹ️" ;;
+    "test") icon="🧪" ;;
+  esac
+
+  osascript -e "display notification \"$message\" with title \"$icon $title\" sound name \"default\"" >/dev/null 2>&1 &
+}
+
+# Slack notification
+send_slack_notification() {
+  local title="$1"
+  local message="$2"
+  local type="$3"
+
+  local color=""
+  local icon=""
+  case $type in
+    "success") color="good"; icon="✅" ;;
+    "error") color="danger"; icon="❌" ;;
+    "info") color=""; icon="ℹ️" ;;
+    "test") color="warning"; icon="🧪" ;;
+  esac
+
+  local payload
+  payload=$(cat << EOF
+{
+  "attachments": [
+    {
+      "color": "$color",
+      "title": "$icon $title",
+      "text": "$message",
+      "footer": "Claude Auto Project Template",
+      "ts": $(date +%s)
+    }
+  ]
+}
+EOF
+  )
+
+  curl -X POST -H 'Content-type: application/json' \
+    --data "$payload" \
+    "$SLACK_WEBHOOK_URL" >/dev/null 2>&1 &
+}
+
+# Discord notification
+send_discord_notification() {
+  local title="$1"
+  local message="$2"
+  local type="$3"
+
+  local color=""
+  local icon=""
+  case $type in
+    "success") color="3066993"; icon="✅" ;;  # Green
+    "error") color="15158332"; icon="❌" ;;   # Red
+    "info") color="3447003"; icon="ℹ️" ;;    # Blue
+    "test") color="16776960"; icon="🧪" ;;   # Yellow
+  esac
+
+  local payload
+  payload=$(cat << EOF
+{
+  "embeds": [
+    {
+      "title": "$icon $title",
+      "description": "$message",
+      "color": $color,
+      "footer": {
+        "text": "Claude Auto Project Template"
+      },
+      "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+  ]
+}
+EOF
+  )
+
+  curl -H "Content-Type: application/json" \
+    -d "$payload" \
+    "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1 &
+}
+
+# Email notification
+send_email_notification() {
+  local title="$1"
+  local message="$2"
+  local type="$3"
+
+  local subject="[$type] $title"
+  local body="$message
+
+---
+Claude Auto Project Template
+$(date)"
+
+  if command -v mail >/dev/null 2>&1; then
+    echo "$body" | mail -s "$subject" "$EMAIL_ADDRESS" >/dev/null 2>&1 &
+  fi
+}
+
 # Main execution function
 main() {
   log "🚀 Claude自動プロジェクトセットアップ v$SCRIPT_VERSION を開始"
@@ -1096,6 +1421,9 @@ main() {
   local visibility
   visibility=$(get_repository_visibility)
 
+  # Setup notifications (only if not configured yet)
+  setup_notifications
+
   # Setup with cleanup tracking
   setup_local_project "$project_name" "$project_dir"
   add_cleanup "rm -rf '$project_dir/$project_name' 2>/dev/null || true"
@@ -1120,6 +1448,9 @@ main() {
   # Show project statistics
   show_project_stats
 
+  # Send project creation notification
+  send_notification "🚀 プロジェクト作成完了" "$project_name が正常に作成されました！Claudeが作業を開始します。" "success"
+
   # Clear cleanup stack on success
   CLEANUP_STACK=()
 
@@ -1141,11 +1472,12 @@ main() {
   echo "3. 💻 VS Codeで開く" >&2
   echo "4. 📂 Finderで開く" >&2
   echo "5. 🌐 GitHubでPRを確認" >&2
-  echo "6. 📊 統計のみ表示して終了" >&2
+  echo "6. 🔔 通知設定を変更" >&2
+  echo "7. 📊 統計のみ表示して終了" >&2
   echo "" >&2
 
   local choice=""
-  echo -n "選択してください (1-6) [デフォルト: 1]: " >&2
+  echo -n "選択してください (1-7) [デフォルト: 1]: " >&2
   read choice
   choice="${choice:-1}"
 
@@ -1181,6 +1513,14 @@ main() {
       echo "✅ ブラウザでPRを開きました！" >&2
       ;;
     6)
+      echo "" >&2
+      echo "🔔 通知設定を再設定します..." >&2
+      NOTIFICATION_ENABLED=""  # Reset to force re-setup
+      setup_notifications
+      save_config
+      echo "✅ 通知設定が更新されました！" >&2
+      ;;
+    7)
       echo "📊 統計のみ表示して終了します。" >&2
       ;;
     *)
