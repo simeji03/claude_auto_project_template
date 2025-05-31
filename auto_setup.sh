@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
 set -e
 
-# 🌸 Self-downloading pattern for curl | bash safety
-if [[ "${BASH_SOURCE[0]}" == "/dev/stdin" ]] || [[ "${BASH_SOURCE[0]}" == "/proc/self/fd/0" ]]; then
-  echo "🔄 curl | bash detected. Downloading script to temporary file..." >&2
+# 🌸 Enhanced curl | bash detection and self-downloading pattern
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+if [[ "$SCRIPT_SOURCE" == "/dev/stdin" ]] || [[ "$SCRIPT_SOURCE" == "/proc/self/fd/0" ]] || [[ ! -f "$SCRIPT_SOURCE" ]] || [[ "$0" == "bash" ]]; then
+  echo "🔄 curl | bash detected. Downloading script to temporary file for safe execution..." >&2
 
-  # Create temporary file
-  TEMP_SCRIPT=$(mktemp)
-  trap "rm -f '$TEMP_SCRIPT'" EXIT
+  # Create temporary file with proper cleanup
+  TEMP_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/auto_setup.XXXXXX.sh")
+  trap "rm -f '$TEMP_SCRIPT'" EXIT INT TERM
 
   # Download script to temp file
-  curl -s https://raw.githubusercontent.com/simeji03/claude_auto_project_template/main/auto_setup.sh > "$TEMP_SCRIPT"
+  if ! curl -sSL https://raw.githubusercontent.com/simeji03/claude_auto_project_template/main/auto_setup.sh > "$TEMP_SCRIPT"; then
+    echo "❌ Failed to download script. Please check your internet connection." >&2
+    exit 1
+  fi
 
-  # Execute the downloaded script
-  exec bash "$TEMP_SCRIPT"
+  # Verify download
+  if [[ ! -s "$TEMP_SCRIPT" ]]; then
+    echo "❌ Downloaded script is empty. Please try again." >&2
+    exit 1
+  fi
+
+  echo "✅ Script downloaded successfully. Executing..." >&2
+
+  # Execute the downloaded script with proper stdin
+  exec bash "$TEMP_SCRIPT" < /dev/tty
 fi
 
 # 🌸 実行環境チェック（既存Gitリポジトリでの実行を防ぐ）
@@ -26,8 +38,16 @@ fi
 # 🌸 プロジェクト名の入力（検証付き）
 PROJECT=""
 while true; do
-  echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
-  read PROJECT
+  # Interactive input with explicit terminal handling
+  if [[ -t 0 ]]; then
+    # Standard terminal input
+    echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
+    read PROJECT
+  else
+    # Fallback for non-terminal environments
+    echo -n "新しいプロジェクト名を入力してください（英数字・ハイフン・アンダースコアのみ）: " >&2
+    read PROJECT < /dev/tty
+  fi
 
   # 空文字チェック
   if [[ -z "$PROJECT" ]]; then
