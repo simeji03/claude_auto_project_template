@@ -79,18 +79,21 @@ check_prerequisites() {
   log "GitHubユーザー: $GH_USERNAME"
 
   # Check GitHub token permissions
-  local token_scopes
-  token_scopes=$(gh auth status 2>&1 | grep "Token scopes:" | sed "s/.*Token scopes: '\(.*\)'.*/\1/") || error "トークンスコープの取得に失敗しました"
+  local token_output
+  token_output=$(gh auth status 2>&1)
+
+  log "🔍 GitHubトークン情報をチェック中..."
 
   for required_scope in "repo" "workflow"; do
-    if [[ ! "$token_scopes" =~ $required_scope ]]; then
+    if ! echo "$token_output" | grep -q "$required_scope"; then
       error "必要なGitHubトークンスコープが不足しています: $required_scope
 
 🔧 解決方法:
 以下のコマンドを実行して再認証してください:
 gh auth login --scopes repo,workflow
 
-🔍 現在のスコープ: $token_scopes"
+🔍 現在の認証情報:
+$token_output"
     fi
   done
 
