@@ -3,7 +3,7 @@ set -e
 
 # 🌸 Professional-grade curl | bash safety with heredoc pattern
 if [[ ! -t 0 ]] && [[ "${AUTO_SETUP_DIRECT_RUN:-}" != "1" ]]; then
-  echo "🔄 Detected piped execution (curl | bash). Switching to safe mode..." >&2
+  echo "🔄 パイプ実行（curl | bash）を検出しました。安全モードに切り替えます..." >&2
 
   # Read the entire script into memory first
   SCRIPT_CONTENT=$(cat)
@@ -24,16 +24,16 @@ log() {
 }
 
 error() {
-  log "❌ ERROR: $*"
+  log "❌ エラー: $*"
   exit 1
 }
 
 success() {
-  log "✅ SUCCESS: $*"
+  log "✅ 成功: $*"
 }
 
 warning() {
-  log "⚠️  WARNING: $*"
+  log "⚠️  警告: $*"
 }
 
 # Retry function for critical operations
@@ -44,15 +44,15 @@ retry() {
   local cmd="$*"
 
   for ((i=1; i<=max_attempts; i++)); do
-    log "Attempt $i/$max_attempts: $cmd"
+    log "試行 $i/$max_attempts: $cmd"
     if eval "$cmd"; then
       return 0
     else
       if [[ $i -lt $max_attempts ]]; then
-        warning "Command failed, retrying in ${delay}s..."
+        warning "コマンドが失敗しました。${delay}秒後にリトライします..."
         sleep "$delay"
       else
-        error "Command failed after $max_attempts attempts: $cmd"
+        error "コマンドが$max_attempts回試行後も失敗しました: $cmd"
       fi
     fi
   done
@@ -60,44 +60,52 @@ retry() {
 
 # Comprehensive prerequisites check
 check_prerequisites() {
-  log "🔍 Checking prerequisites..."
+  log "🔍 前提条件をチェック中..."
 
   # Check required commands
   for cmd in $REQUIRED_COMMANDS; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-      error "Required command not found: $cmd"
+      error "必要なコマンドが見つかりません: $cmd"
     fi
   done
 
   # Check GitHub CLI authentication
   if ! gh auth status >/dev/null 2>&1; then
-    error "GitHub CLI not authenticated. Please run: gh auth login"
+    error "GitHub CLIが認証されていません。以下を実行してください: gh auth login --scopes repo,workflow"
   fi
 
   # Get GitHub username
-  GH_USERNAME=$(gh api user --jq .login 2>/dev/null) || error "Failed to get GitHub username"
-  log "GitHub user: $GH_USERNAME"
+  GH_USERNAME=$(gh api user --jq .login 2>/dev/null) || error "GitHubユーザー名の取得に失敗しました"
+  log "GitHubユーザー: $GH_USERNAME"
 
   # Check GitHub token permissions
   local token_scopes
-  token_scopes=$(gh auth status 2>&1 | grep "Token scopes:" | cut -d"'" -f2) || error "Failed to get token scopes"
+  token_scopes=$(gh auth status 2>&1 | grep "Token scopes:" | cut -d"'" -f2) || error "トークンスコープの取得に失敗しました"
 
   for required_scope in "repo" "workflow"; do
     if [[ ! "$token_scopes" =~ $required_scope ]]; then
-      error "Missing required GitHub token scope: $required_scope"
+      error "必要なGitHubトークンスコープが不足しています: $required_scope
+
+🔧 解決方法:
+以下のコマンドを実行して再認証してください:
+gh auth login --scopes repo,workflow"
     fi
   done
 
   # Check ANTHROPIC_API_KEY
   if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-    error "Environment variable ANTHROPIC_API_KEY not set. Please set it in ~/.zshrc"
+    error "環境変数 ANTHROPIC_API_KEY が設定されていません。~/.zshrc に設定してください
+
+🔧 設定方法:
+echo 'export ANTHROPIC_API_KEY=\"your-api-key-here\"' >> ~/.zshrc
+source ~/.zshrc"
   fi
 
   if [[ ${#ANTHROPIC_API_KEY} -lt 50 ]]; then
-    error "ANTHROPIC_API_KEY appears to be invalid (too short)"
+    error "ANTHROPIC_API_KEY が無効です（短すぎます）"
   fi
 
-  success "All prerequisites verified"
+  success "すべての前提条件が確認されました"
 }
 
 # Enhanced project name validation
@@ -144,19 +152,19 @@ get_project_name() {
     read project_name
 
     if validate_project_name "$project_name"; then
-      log "Project name validated: $project_name"
+      log "プロジェクト名が検証されました: $project_name"
       echo "$project_name"
       return 0
     else
       ((attempts++))
-      warning "Invalid project name: '$project_name'"
+      warning "無効なプロジェクト名です: '$project_name'"
       echo "   - 英数字・ハイフン・アンダースコアのみ使用可能" >&2
       echo "   - 3-39文字の長さ" >&2
       echo "   - ハイフン・アンダースコアで始まったり終わったりしない" >&2
       echo "   - システム予約語は使用不可" >&2
 
       if [[ $attempts -eq $max_attempts ]]; then
-        error "Too many invalid attempts for project name"
+        error "プロジェクト名の試行回数が上限に達しました"
       fi
     fi
   done
@@ -168,15 +176,15 @@ check_conflicts() {
 
   # Check local directory
   if [[ -d ~/Projects/"$project_name" ]]; then
-    error "Project directory already exists: ~/Projects/$project_name"
+    error "プロジェクトディレクトリが既に存在します: ~/Projects/$project_name"
   fi
 
   # Check GitHub repository
   if gh repo view "$GH_USERNAME/$project_name" >/dev/null 2>&1; then
-    error "GitHub repository already exists: $GH_USERNAME/$project_name"
+    error "GitHubリポジトリが既に存在します: $GH_USERNAME/$project_name"
   fi
 
-  success "No conflicts found for project: $project_name"
+  success "プロジェクト '$project_name' に競合はありません"
 }
 
 # Create and setup local project
@@ -184,43 +192,43 @@ setup_local_project() {
   local project_name="$1"
   local project_dir="$HOME/Projects/$project_name"
 
-  log "Creating local project directory..."
-  mkdir -p "$project_dir" || error "Failed to create project directory"
-  cd "$project_dir" || error "Failed to change to project directory"
+  log "ローカルプロジェクトディレクトリを作成中..."
+  mkdir -p "$project_dir" || error "プロジェクトディレクトリの作成に失敗しました"
+  cd "$project_dir" || error "プロジェクトディレクトリへの移動に失敗しました"
 
-  log "Initializing Git repository..."
-  git init -b main >/dev/null 2>&1 || error "Failed to initialize Git repository"
+  log "Gitリポジトリを初期化中..."
+  git init -b main >/dev/null 2>&1 || error "Gitリポジトリの初期化に失敗しました"
 
-  log "Creating initial README..."
+  log "初期READMEを作成中..."
   cat > README.md << EOF
 # $project_name
 
-Auto-generated project with Claude Code Action integration.
+Claude Code Action統合により自動生成されたプロジェクトです。
 
-## Getting Started
+## はじめに
 
-This project was bootstrapped with Claude Auto Project Template.
+このプロジェクトはClaude Auto Project Templateでブートストラップされました。
 
-## Development
+## 開発手順
 
-1. Make changes to your code
-2. Create a pull request
-3. Comment \`@claude\` to invoke AI assistance
-4. Let Claude help you build amazing features!
+1. コードを変更
+2. プルリクエストを作成
+3. コメントで \`@claude\` を呼び出してAIサポートを受ける
+4. Claudeと一緒に素晴らしい機能を構築！
 
-## Features
+## 機能
 
-- 🤖 Claude AI integration
-- 🚀 Automated workflows
-- 📝 Smart code generation
-- 🔄 Continuous improvement
+- 🤖 Claude AI統合
+- 🚀 自動化ワークフロー
+- 📝 スマートなコード生成
+- 🔄 継続的改善
 
 ---
 
-Generated on $(date)
+生成日: $(date)
 EOF
 
-  log "Setting up Claude workflow..."
+  log "Claudeワークフローを設定中..."
   mkdir -p .github/workflows
 
   cat > .github/workflows/claude.yml << 'EOF'
@@ -247,107 +255,107 @@ jobs:
           mode: pr
 EOF
 
-  success "Local project setup completed"
+  success "ローカルプロジェクトのセットアップが完了しました"
 }
 
 # Create GitHub repository with robust error handling
 create_github_repo() {
   local project_name="$1"
 
-  log "Creating GitHub repository..."
+  log "GitHubリポジトリを作成中..."
 
   # Create repository with retry
-  retry 3 2 "gh repo create '$project_name' --private --clone=false --description 'Auto-generated project with Claude integration'"
+  retry 3 2 "gh repo create '$project_name' --private --clone=false --description 'Claude統合により自動生成されたプロジェクト'"
 
   # Add remote
   retry 3 1 "git remote add origin https://github.com/$GH_USERNAME/$project_name.git"
 
   # Verify remote was added
   if ! git remote get-url origin >/dev/null 2>&1; then
-    error "Failed to add remote origin"
+    error "リモートoriginの追加に失敗しました"
   fi
 
-  success "GitHub repository created: $GH_USERNAME/$project_name"
+  success "GitHubリポジトリが作成されました: $GH_USERNAME/$project_name"
 }
 
 # Setup GitHub secrets
 setup_github_secrets() {
   local project_name="$1"
 
-  log "Setting up GitHub secrets..."
+  log "GitHubシークレットを設定中..."
 
   # Set ANTHROPIC_API_KEY secret
   retry 3 2 "gh secret set ANTHROPIC_API_KEY -b'$ANTHROPIC_API_KEY' -R '$GH_USERNAME/$project_name'"
 
   # Verify secret was set
   if ! gh secret list -R "$GH_USERNAME/$project_name" | grep -q "ANTHROPIC_API_KEY"; then
-    error "Failed to verify ANTHROPIC_API_KEY secret"
+    error "ANTHROPIC_API_KEYシークレットの確認に失敗しました"
   fi
 
-  success "GitHub secrets configured"
+  success "GitHubシークレットが設定されました"
 }
 
 # Commit and push with robust handling
 commit_and_push() {
   local project_name="$1"
 
-  log "Committing initial files..."
-  git add . || error "Failed to add files to git"
-  git commit -m "chore: bootstrap $project_name with Claude integration
+  log "初期ファイルをコミット中..."
+  git add . || error "ファイルのgit addに失敗しました"
+  git commit -m "chore: $project_name をClaude統合でブートストラップ
 
-- Add README with project description
-- Configure Claude Code Action workflow
-- Set up automated development environment
-- Ready for AI-assisted development" >/dev/null 2>&1 || error "Failed to commit files"
+- プロジェクト説明付きREADMEを追加
+- Claude Code Actionワークフローを設定
+- 自動化開発環境をセットアップ
+- AI支援開発の準備完了" >/dev/null 2>&1 || error "ファイルのコミットに失敗しました"
 
-  log "Pushing to GitHub..."
+  log "GitHubにプッシュ中..."
   retry 5 3 "git push -u origin main"
 
-  success "Code pushed to main branch"
+  success "コードがmainブランチにプッシュされました"
 }
 
 # Create feature branch and PR
 create_feature_pr() {
   local project_name="$1"
 
-  log "Creating feature branch..."
-  git checkout -b feat/initial-development >/dev/null 2>&1 || error "Failed to create feature branch"
+  log "フィーチャーブランチを作成中..."
+  git checkout -b feat/initial-development >/dev/null 2>&1 || error "フィーチャーブランチの作成に失敗しました"
 
   # Add a placeholder file to trigger PR
   cat >> README.md << EOF
 
-## Next Steps
+## 次のステップ
 
-Ready for development! Use @claude in PR comments to start building.
+開発準備完了！PRコメントで@claudeを使用して開発を開始してください。
 
-<!-- Development placeholder -->
+<!-- 開発プレースホルダー -->
 EOF
 
-  git add README.md || error "Failed to add README changes"
-  git commit -m "feat: prepare for initial development
+  git add README.md || error "README変更のaddに失敗しました"
+  git commit -m "feat: 初期開発の準備
 
-- Add development placeholder
-- Ready for Claude assistance
-- Trigger first PR workflow" >/dev/null 2>&1 || error "Failed to commit feature changes"
+- 開発プレースホルダーを追加
+- Claude支援の準備完了
+- 最初のPRワークフローをトリガー" >/dev/null 2>&1 || error "フィーチャー変更のコミットに失敗しました"
 
   retry 3 2 "git push -u origin feat/initial-development"
 
-  log "Creating pull request..."
+  log "プルリクエストを作成中..."
   local pr_url
-  pr_url=$(retry 3 2 "gh pr create --title 'feat: Initial development setup' --body 'Initial setup for $project_name
+  pr_url=$(retry 3 2 "gh pr create --title 'feat: 初期開発セットアップ' --body '$project_name の初期セットアップ
 
-## Ready for Claude!
+## Claudeの準備完了！
 
-This PR sets up the project structure and is ready for AI-assisted development.
+このPRはプロジェクト構造をセットアップし、AI支援開発の準備が整いました。
 
-### What to do next:
-1. Comment \`@claude scaffold a simple auto-reply app\` to start development
-2. Let Claude build your application automatically
-3. Review and iterate on the generated code
+### 次にすること:
+1. \`@claude 簡単な自動返信アプリを構築してください\` とコメント
+2. Claudeに自動的にアプリケーションを構築してもらう
+3. 生成されたコードをレビューして改良
 
-Happy coding! 🚀' --head feat/initial-development --base main") || error "Failed to create pull request"
+ハッピーコーディング！ 🚀' --head feat/initial-development --base main") || error "プルリクエストの作成に失敗しました"
 
-  success "Pull request created: $pr_url"
+  success "プルリクエストが作成されました: $pr_url"
   return 0
 }
 
@@ -355,35 +363,35 @@ Happy coding! 🚀' --head feat/initial-development --base main") || error "Fail
 trigger_claude() {
   local project_name="$1"
 
-  log "Triggering Claude for automatic code generation..."
+  log "Claudeの自動コード生成をトリガー中..."
 
   # Get PR number
   local pr_number
-  pr_number=$(gh pr view feat/initial-development --json number --jq .number 2>/dev/null) || error "Failed to get PR number"
+  pr_number=$(gh pr view feat/initial-development --json number --jq .number 2>/dev/null) || error "PR番号の取得に失敗しました"
 
   # Post Claude comment
-  retry 3 2 "gh api repos/$GH_USERNAME/$project_name/issues/$pr_number/comments -f body='@claude scaffold a simple auto-reply application with the following features:
+  retry 3 2 "gh api repos/$GH_USERNAME/$project_name/issues/$pr_number/comments -f body='@claude 以下の機能を持つシンプルな自動返信アプリケーションを構築してください:
 
-## Requirements
-- Simple and clean architecture
-- Auto-reply functionality
-- Modern UI/UX
-- Proper error handling
-- Documentation
-- Tests
+## 要件
+- シンプルで分かりやすいアーキテクチャ
+- 自動返信機能
+- モダンなUI/UX
+- 適切なエラーハンドリング
+- ドキュメント
+- テスト
 
-Please create a complete, production-ready application. Thanks!'"
+完全な本番対応アプリケーションを作成してください。よろしくお願いします！'"
 
-  success "Claude triggered successfully! Check your PR for automatic code generation."
+  success "Claudeが正常にトリガーされました！PRで自動コード生成を確認してください。"
 }
 
 # Main execution function
 main() {
-  log "🚀 Starting Claude Auto Project Setup v$SCRIPT_VERSION"
+  log "🚀 Claude自動プロジェクトセットアップ v$SCRIPT_VERSION を開始"
 
   # Check if running in existing Git repo
   if [[ -d ".git" ]]; then
-    error "Cannot run in existing Git repository. Please run in a clean directory."
+    error "既存のGitリポジトリ内では実行できません。クリーンなディレクトリで実行してください。"
   fi
 
   # Run all setup steps
@@ -407,16 +415,16 @@ main() {
   trigger_claude "$project_name"
 
   # Final success message
-  log "🎉 SUCCESS: $project_name is ready!"
+  log "🎉 成功: $project_name の準備が完了しました！"
   echo "" >&2
-  echo "📍 Project Location: $HOME/Projects/$project_name" >&2
-  echo "🔗 GitHub Repository: https://github.com/$GH_USERNAME/$project_name" >&2
-  echo "📋 Pull Request: https://github.com/$GH_USERNAME/$project_name/pulls" >&2
+  echo "📍 プロジェクト場所: $HOME/Projects/$project_name" >&2
+  echo "🔗 GitHubリポジトリ: https://github.com/$GH_USERNAME/$project_name" >&2
+  echo "📋 プルリクエスト: https://github.com/$GH_USERNAME/$project_name/pulls" >&2
   echo "" >&2
-  echo "🤖 Claude is now generating your application!" >&2
-  echo "   Check the PR comments for progress updates." >&2
+  echo "🤖 Claudeがアプリケーションを生成中です！" >&2
+  echo "   進行状況はPRコメントで確認してください。" >&2
   echo "" >&2
-  echo "📊 Setup Log: $LOG_FILE" >&2
+  echo "📊 セットアップログ: $LOG_FILE" >&2
 }
 
 # Execute main function
