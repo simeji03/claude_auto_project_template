@@ -251,14 +251,19 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
       - name: Claude Code Action
         uses: anthropics/claude-code-action@v0.0.7
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          trigger_phrases: '/claude, @claude'
-          mode: pr
+          trigger_phrase: '@claude'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 EOF
 
   success "ローカルプロジェクトのセットアップが完了しました"
