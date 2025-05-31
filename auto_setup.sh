@@ -2,6 +2,7 @@
 set -e
 
 # 🌸 プロジェクト名の入力（空なら再度聞く）
+PROJECT=""
 while [[ -z "$PROJECT" ]]; do
   read -rp "新しいプロジェクト名を入力してください（必須）: " PROJECT
 done
