@@ -178,10 +178,11 @@ get_project_name() {
 # Check for existing conflicts
 check_conflicts() {
   local project_name="$1"
+  local project_dir="$2"
 
   # Check local directory
-  if [[ -d ~/Projects/"$project_name" ]]; then
-    error "プロジェクトディレクトリが既に存在します: ~/Projects/$project_name"
+  if [[ -d "$project_dir/$project_name" ]]; then
+    error "プロジェクトディレクトリが既に存在します: $project_dir/$project_name"
   fi
 
   # Check GitHub repository
@@ -195,7 +196,7 @@ check_conflicts() {
 # Create and setup local project
 setup_local_project() {
   local project_name="$1"
-  local project_dir="$HOME/Projects/$project_name"
+  local project_dir="$2/$project_name"
 
   log "ローカルプロジェクトディレクトリを作成中..."
   mkdir -p "$project_dir" || error "プロジェクトディレクトリの作成に失敗しました"
@@ -390,6 +391,56 @@ trigger_claude() {
   success "Claudeが正常にトリガーされました！PRで自動コード生成を確認してください。"
 }
 
+# Get project directory preference
+get_project_directory() {
+  echo "" >&2
+  echo "📁 プロジェクトの作成場所を選択してください:" >&2
+  echo "1. ~/Projects/ (推奨)" >&2
+  echo "2. ~/Desktop/" >&2
+  echo "3. ~/Documents/" >&2
+  echo "4. 現在のディレクトリ ($PWD)" >&2
+  echo "5. カスタムパス" >&2
+  echo "" >&2
+
+  local choice=""
+  while true; do
+    echo -n "選択してください (1-5): " >&2
+    read choice
+
+    case $choice in
+      1)
+        echo "$HOME/Projects"
+        return 0
+        ;;
+      2)
+        echo "$HOME/Desktop"
+        return 0
+        ;;
+      3)
+        echo "$HOME/Documents"
+        return 0
+        ;;
+      4)
+        echo "$PWD"
+        return 0
+        ;;
+      5)
+        echo -n "カスタムパスを入力してください: " >&2
+        read custom_path
+        if [[ -d "$custom_path" ]] || mkdir -p "$custom_path" 2>/dev/null; then
+          echo "$custom_path"
+          return 0
+        else
+          warning "無効なパスです: $custom_path"
+        fi
+        ;;
+      *)
+        warning "無効な選択です。1-5の数字を入力してください。"
+        ;;
+    esac
+  done
+}
+
 # Main execution function
 main() {
   log "🚀 Claude自動プロジェクトセットアップ v$SCRIPT_VERSION を開始"
@@ -405,9 +456,12 @@ main() {
   local project_name
   project_name=$(get_project_name)
 
-  check_conflicts "$project_name"
+  local project_dir
+  project_dir=$(get_project_directory)
 
-  setup_local_project "$project_name"
+  check_conflicts "$project_name" "$project_dir"
+
+  setup_local_project "$project_name" "$project_dir"
 
   create_github_repo "$project_name"
 
@@ -422,14 +476,29 @@ main() {
   # Final success message
   log "🎉 成功: $project_name の準備が完了しました！"
   echo "" >&2
-  echo "📍 プロジェクト場所: $HOME/Projects/$project_name" >&2
+  echo "=========================================" >&2
+  echo "🎊 プロジェクト作成完了！" >&2
+  echo "=========================================" >&2
+  echo "📍 プロジェクト場所: $project_dir/$project_name" >&2
   echo "🔗 GitHubリポジトリ: https://github.com/$GH_USERNAME/$project_name" >&2
   echo "📋 プルリクエスト: https://github.com/$GH_USERNAME/$project_name/pulls" >&2
   echo "" >&2
-  echo "🤖 Claudeがアプリケーションを生成中です！" >&2
-  echo "   進行状況はPRコメントで確認してください。" >&2
+  echo "🤖 Claudeの動作確認:" >&2
+  echo "   1. 上記のプルリクエストリンクを開く" >&2
+  echo "   2. コメント欄で '@claude' の投稿を確認" >&2
+  echo "   3. Claudeからの返信を待つ（通常1-3分）" >&2
+  echo "   4. 自動生成されたコードを確認" >&2
+  echo "" >&2
+  echo "🔗 直接リンク:" >&2
+  echo "   👉 https://github.com/$GH_USERNAME/$project_name/pull/1" >&2
+  echo "" >&2
+  echo "💡 次のステップ:" >&2
+  echo "   - Finderでプロジェクトフォルダを開く: open '$project_dir/$project_name'" >&2
+  echo "   - VSCodeで開く: code '$project_dir/$project_name'" >&2
+  echo "   - GitHub Desktopで開く: github '$project_dir/$project_name'" >&2
   echo "" >&2
   echo "📊 セットアップログ: $LOG_FILE" >&2
+  echo "=========================================" >&2
 }
 
 # Execute main function
